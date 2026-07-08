@@ -11,6 +11,7 @@ class HTTPMethod(str, Enum):
     DELETE= "delete"
     HEAD= "head"
     OPTIONS= "options"
+    PATCH= "patch"
 
 class AuthType(str, Enum):
     NONE= "none"
@@ -24,7 +25,7 @@ class EndpointSpec(BaseModel):
     path: str
     summary: str | None = None
     description: str | None = None
-    params: list[ParamSpec] = Field(default_factory=list)
+    parameters: list[ParamSpec] = Field(default_factory=list)
     request_body: SchemaSpec | None = None
     responses: dict[str, SchemaSpec] = Field(default_factory=dict)
     auth: AuthType = AuthType.NONE

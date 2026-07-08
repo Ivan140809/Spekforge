@@ -9,7 +9,7 @@ class SchemaSpec(BaseModel):
     properties: dict[str, "SchemaSpec"] = Field(default_factory=dict)
     required: list[str] = Field(default_factory=list)
     items: "SchemaSpec | None" = None
-    enum: list[str] | None = None
+    enum:list[str] | None = None
     ref:str | None = None
 
 

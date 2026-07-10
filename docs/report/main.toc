@@ -1,0 +1,27 @@
+\babel@toc {english}{}\relax 
+\contentsline {chapter}{\numberline {1}Introduction}{2}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Context and motivation}{2}{section.1.1}%
+\contentsline {section}{\numberline {1.2}General objective}{2}{section.1.2}%
+\contentsline {section}{\numberline {1.3}The loop of verification}{2}{section.1.3}%
+\contentsline {section}{\numberline {1.4}Scope and Approach}{3}{section.1.4}%
+\contentsline {subsection}{\numberline {1.4.1}Verification with graceful degradation}{3}{subsection.1.4.1}%
+\contentsline {subsection}{\numberline {1.4.2}Target API with ground truth}{3}{subsection.1.4.2}%
+\contentsline {section}{\numberline {1.5}General architecture of the system}{3}{section.1.5}%
+\contentsline {subsection}{\numberline {1.5.1}Stages of work}{3}{subsection.1.5.1}%
+\contentsline {subsection}{\numberline {1.5.2}The intermediate model and repository}{4}{subsection.1.5.2}%
+\contentsline {section}{\numberline {1.6}Technological Stack}{4}{section.1.6}%
+\contentsline {section}{\numberline {1.7}Document structure}{4}{section.1.7}%
+\contentsline {chapter}{\numberline {2}Phase 0 - Staging of Project}{5}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Phase objective}{5}{section.2.1}%
+\contentsline {section}{\numberline {2.2}File structure}{5}{section.2.2}%
+\contentsline {section}{\numberline {2.3}Background configuration}{5}{section.2.3}%
+\contentsline {subsection}{\numberline {2.3.1}\texttt {pyproject.toml}}{5}{subsection.2.3.1}%
+\contentsline {subsection}{\numberline {2.3.2}\texttt {.gitignore}}{6}{subsection.2.3.2}%
+\contentsline {subsection}{\numberline {2.3.3}Dependencies installation}{7}{subsection.2.3.3}%
+\contentsline {section}{\numberline {2.4}Intermediate model}{7}{section.2.4}%
+\contentsline {subsection}{\numberline {2.4.1}\texttt {ParamSpec}}{8}{subsection.2.4.1}%
+\contentsline {subsection}{\numberline {2.4.2}\texttt {SchemaSpec}}{8}{subsection.2.4.2}%
+\contentsline {subsection}{\numberline {2.4.3}\texttt {EndpointSpec}}{9}{subsection.2.4.3}%
+\contentsline {section}{\numberline {2.5}Deliverable Validation}{9}{section.2.5}%
+\contentsline {subsection}{\numberline {2.5.1}Tests}{9}{subsection.2.5.1}%
+\contentsline {subsection}{\numberline {2.5.2}Execution}{10}{subsection.2.5.2}%

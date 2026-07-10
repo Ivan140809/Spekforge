@@ -1,0 +1,126 @@
+\documentclass[11pt,a4paper]{report}
+
+
+% packages
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{booktabs}
+
+% styles of code listings
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codegray}{RGB}{110,110,110}
+\definecolor{codegreen}{RGB}{0,120,0}
+\definecolor{codeblue}{RGB}{0,0,180}
+
+\lstdefinestyle{codestyle}{
+    backgroundcolor=\color{codebg},
+    commentstyle=\color{codegray}\itshape,
+    keywordstyle=\color{codeblue}\bfseries,
+    stringstyle=\color{codegreen},
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    breakatwhitespace=true,
+    numbers=left,
+    numbersep=6pt,
+    numberstyle=\tiny\color{codegray},
+    frame=single,
+    rulecolor=\color{black!20},
+    tabsize=4,
+    showstringspaces=false,
+    captionpos=b,
+}
+\lstset{style=codestyle}
+
+% Hyperlinks 
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!50!black,      
+    urlcolor=blue!50!black,
+    citecolor=blue!50!black,
+    pdftitle={Spekforge - Documentation},
+    pdfauthor= {Ivan Santiago Lastra Romero},
+    bookmarksopen=true,
+}
+
+% command for captures of images
+% use: \capture (text of description for capture){figure caption}
+
+\newcommand{\capture}[2]{%
+\begin{figure}[h!]
+\centering
+\fbox{\begin{minipage}{0.85\textwidth}
+\centering
+\vspace{1.8cm}
+{\Large \textit{[Screenshot placeholder]}} \\[10pt]
+\textbf{#1}
+\vspace{1.8cm}
+\end{minipage}}
+\caption{#2}
+\end{figure}
+}
+
+% as I had the real image replace the \capture for:
+% \realcapture{0.85}{nameoffile.png}{figure caption}
+\newcommand{\realcapture}[3]{%
+\begin{figure}[h!]
+\centering
+\includegraphics[width=#1\textwidth]{images/#2}
+\caption{#3}
+\end{figure}
+}
+
+% Headings
+\setlength{\headheight}{14pt}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Spekforge}
+\fancyhead[R]{\leftmark}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\begin{document}
+
+% front page
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+
+    {\Huge \textbf{Spekforge}}\\[0.7cm]
+    {\Large Reconstruction of API specifications\\ from Documentation with LLMs} \\[2cm]
+
+    {\large Technical Documentation of project}\\[3cm]
+
+    \rule{0.8\textwidth}{0.4pt}\\[1cm]
+
+    {\large \textbf{Author:} Iván Santiago Lastra Romero} \\[0.3cm]
+    {\large \textbf{Repository:} Spekforge} \\[0.3cm]
+    {\large \textbf{Date:} \today}\\
+
+    \vfill
+
+    {\normalsize Project - pipeline of OpenAPI specification\\
+     reconstruction with automatic verification}
+    
+    \vspace{1cm}
+\end{titlepage}
+
+% table of contents
+\tableofcontents
+\newpage
+
+%Chapters
+\input{chapters/introduction.tex}
+\input{chapters/fase0.tex}
+
+\end{document}

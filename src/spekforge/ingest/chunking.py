@@ -1,5 +1,4 @@
 import re
-from typing import Callable
 from spekforge.models.chunk import Chunk, SourceType
 
 _METHODS = "GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"

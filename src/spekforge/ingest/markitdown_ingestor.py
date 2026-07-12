@@ -3,7 +3,7 @@ from markitdown import MarkItDown
 from spekforge.ingest.chunking import split_into_chunks
 from spekforge.models.chunk import Chunk
 
-_SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".html", ".htm"}
+_SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".html", ".htm", ".md"}
 
 class MarkitdownIngestor:
     def __init__(self) -> None:

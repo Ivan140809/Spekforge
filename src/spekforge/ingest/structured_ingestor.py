@@ -138,6 +138,8 @@ def _walk_postman_items(items: list, results: list[tuple[EndpointSpec,dict]]) ->
         if "item" in item:
             _walk_postman_items(item["item"], results)
             continue
+        if "request" not in item:
+            continue
         request = item.get("request", {})
         method_str = request.get("method", "GET").upper()
         if method_str not in HTTPMethod.__members__:
@@ -164,13 +166,13 @@ def _postman_params(request:dict, url) -> list[ParamSpec]:
     params = [
         ParamSpec(name=h["key"], location=ParamLocation.HEADER, required=not h.get("disabled", False), type= "string")
         for h in request.get("header",[])
-        if h.get("key")
+        if h.get("key") and not h.get("disabled",False)
     ]
     if isinstance(url, dict):
         params += [
             ParamSpec(name=q["key"], location=ParamLocation.QUERY, required=not q.get("disabled", False), type="string")
             for q in url.get("query", [])
-            if q.get("key")
+            if q.get("key") and not q.get("disabled", False)
         ]
     return params
 

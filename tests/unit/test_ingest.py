@@ -118,14 +118,11 @@ def test_structured_ingestor_infers_types_from_har_response(tmp_path):
     assert schema.properties["active"].type == "boolean"
 
 def test_structured_ingestor_rejects_generic_json(tmp_path):
-    source = tmp_path / "openapi.json"
-    source.write_text(json.dumps({
-        "openapi": "3.0.0",
-        "paths": {"/pets": {"get": {"responses":{}}}},
-    }))
+    source= tmp_path / "not_structured.json"
+    source.write_text(json.dumps({"hello": "world"}))
 
-    chunks = route(source)
-    assert chunks[0].source_type == SourceType.OPENAPI_PARTIAL
+    assert StructuredIngestor().accepts(source) is False
+    
 
 def test_router_dispatches_structured_source(tmp_path):
     source = tmp_path / "openapi.json"

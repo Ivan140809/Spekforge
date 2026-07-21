@@ -1,0 +1,415 @@
+\chapter{Phase 1 - Ingestion}
+
+\section{Phase objective}
+
+Convert a raw documentation source into a list of fragments tagged by
+candidate endpoint, regardless of whether that source is unstructured prose
+like PDF, HTML, or Markdown, or already structured data like a partial
+OpenAPI document, a Postman collection, or a HAR capture. This phase
+produces the input that Phase 2 will consume, and defines the second data
+contract of the pipeline: the \texttt{Chunk} model.
+
+\section{The \texttt{Chunk} model}
+
+\begin{lstlisting}[language=Python, caption={\texttt{src/spekforge/models/chunk.py}}]
+from enum import Enum
+from pydantic import BaseModel
+from spekforge.models.endpoint import EndpointSpec
+
+class SourceType(str, Enum):
+    MARKDOWN = "markdown"
+    OPENAPI_PARTIAL = "openapi_partial"
+    POSTMAN = "postman"
+    HAR = "har"
+
+class Chunk(BaseModel):
+    id:str
+    source_type: SourceType
+    source_path: str
+    raw_text: str
+    candidate_method: str | None = None
+    candidate_path: str | None = None
+    pre_extracted: EndpointSpec | None = None
+\end{lstlisting}
+
+\texttt{Chunk} lives in \texttt{models/}, alongside \texttt{EndpointSpec},
+\texttt{ParamSpec}, and \texttt{SchemaSpec}, because it is a contract
+between two stages of the pipeline (Ingestion $\rightarrow$ Extraction),
+following the same pattern established in Phase 0.
+
+The fields \texttt{candidate\_method} and \texttt{candidate\_path} are typed
+as plain \texttt{str | None}, not as the strict \texttt{HTTPMethod} enum
+used inside \texttt{EndpointSpec}: at this stage they are only a heuristic
+guess extracted from a heading. This avoids forcing the enum too early,
+which would break ingestion the moment a heading did not match the
+expected pattern exactly.
+
+The \texttt{pre\_extracted} field is the mechanism that allows already
+structured sources to skip the LLM call in Phase 2: when this field is
+populated, the orchestrator uses it directly; when it is \texttt{None},
+\texttt{raw\_text} is sent to the model instead. This keeps
+\texttt{to\_intermediate()} returning a uniform \texttt{list[Chunk]}
+regardless of which ingestor produced it.
+
+\section{The \texttt{Ingestor} protocol}
+
+\begin{lstlisting}[language=Python, caption={\texttt{src/spekforge/ingest/base.py}}]
+from pathlib import Path
+from typing import Protocol, runtime_checkable
+from spekforge.models.chunk import Chunk
+
+@runtime_checkable
+class Ingestor(Protocol):
+    def accepts(self, source: Path) -> bool: ...
+    def to_intermediate(self, source: Path) -> list[Chunk]: ...
+\end{lstlisting}
+
+The purpose of \texttt{accepts()} is to answer whether a given ingestor can
+process a source; in the same way, \texttt{router.py} tries each
+registered ingestor in order and dispatches to the first one that returns
+\texttt{True}. \texttt{@runtime\_checkable} allows \texttt{isinstance()}
+checks against this protocol without requiring explicit inheritance: both
+ingestors satisfy the protocol, while a plain object does not.
+
+\section{Markdown chunking heuristic}
+
+\begin{lstlisting}[language=Python, caption={\texttt{src/spekforge/ingest/chunking.py}}]
+import re
+from spekforge.models.chunk import Chunk, SourceType
+
+_METHODS = "GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"
+_ENDPOINT_HEADING = re.compile(
+    rf"^#{{1,6}}\s*\**`?({_METHODS})`?\**\s+`?(/\S*?)`?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+def split_into_chunks(markdown:str, source_path: str) -> list[Chunk]:
+    matches = list(_ENDPOINT_HEADING.finditer(markdown))
+
+    chunks: list[Chunk] = []
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index +1 < len(matches) else len(markdown)
+        raw_text = markdown[start:end].strip()
+
+        chunks.append(
+            Chunk(
+                id=f"{source_path}#{index}",
+                source_type=SourceType.MARKDOWN,
+                source_path=source_path,
+                raw_text=raw_text,
+                candidate_method=match.group(1).upper(),
+                candidate_path=match.group(2).strip(),
+            )
+        )
+    return chunks
+\end{lstlisting}
+
+The boundary between chunks is a heading, not any mention of a method and
+path elsewhere in the text. The regular expression is anchored with the
+pattern \texttt{\^{}...\$} in \texttt{MULTILINE} mode and requires the
+entire line to be the heading, which prevents an inline sentence that
+happens to mention an HTTP method and a path from triggering a false
+boundary inside a paragraph. The pattern also tolerates the decorations
+commonly produced by Markdown documentation generators, such as backticks
+and bold markers around the method and path.
+
+This design carries a known limitation: if a documentation source does not
+follow this heading convention, \texttt{split\_into\_chunks} returns an
+empty list. No fallback has been implemented yet; the idea for a future
+expansion is to build one, but only once there is real data to validate
+what a sensible fallback should look like.
+
+\section{\texttt{MarkitdownIngestor}}
+
+\begin{lstlisting}[language=Python, caption={\texttt{src/spekforge/ingest/markitdown\_ingestor.py}}]
+from pathlib import Path
+from markitdown import MarkItDown
+from spekforge.ingest.chunking import split_into_chunks
+from spekforge.models.chunk import Chunk
+
+_SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".html", ".htm", ".md"}
+
+class MarkitdownIngestor:
+    def __init__(self) -> None:
+        self.converter = MarkItDown()
+
+    def accepts(self, source: Path) -> bool:
+        return source.suffix.lower() in _SUPPORTED_EXTENSIONS
+
+    def to_intermediate(self, source: Path) -> list[Chunk]:
+        result = self.converter.convert(str(source))
+        return split_into_chunks(result.markdown, str(source))
+\end{lstlisting}
+
+This ingestor accepts the set of extensions listed in
+\texttt{\_SUPPORTED\_EXTENSIONS}, converts the source to Markdown through
+\texttt{markitdown}, and delegates the boundary-detection logic to
+\texttt{chunking.py}. Extension recognition was verified for all six
+supported extensions, and the full conversion path was additionally
+validated end to end against real \texttt{.html} and \texttt{.md}
+fixtures, confirming that raw input is correctly converted and
+boundary-split into chunks; \texttt{.pdf}, \texttt{.docx}, and
+\texttt{.pptx} were checked only for extension acceptance so far.
+
+\section{\texttt{StructuredIngestor}}
+
+This ingestor handles three distinct already-structured formats and
+converts each one directly into \texttt{EndpointSpec} objects, bypassing
+the LLM entirely for that data.
+
+\subsection{Format detection}
+
+\begin{lstlisting}[language=Python,caption={Format detection heuristic}]
+def _detect_format(data: dict) -> SourceType | None:
+    if not isinstance(data, dict):
+        return None
+    if "paths" in data and ("openapi" in data or "swagger" in data):
+        return SourceType.OPENAPI_PARTIAL
+    if "item" in data and "info" in data:
+        return SourceType.POSTMAN
+    if "entries" in data.get("log", {}):
+        return SourceType.HAR
+    return None
+\end{lstlisting}
+
+Detection relies on top-level JSON keys, because all three formats are
+plain \texttt{.json} (or, in the case of HAR, sometimes \texttt{.har}) and
+are only distinguishable by their shape.
+
+\subsection{OpenAPI partial}
+
+\begin{lstlisting}[language=Python, caption={Converting OpenAPI into an EndpointSpec}]
+def _from_openapi(data: dict) -> list[tuple[EndpointSpec, dict]]:
+    results = []
+    for path, path_item in data.get("paths", {}).items():
+        for method_str, operation in path_item.items():
+            if method_str.upper() not in HTTPMethod.__members__:
+                continue
+
+            endpoint = EndpointSpec(
+                method=HTTPMethod(method_str.lower()),
+                path=path,
+                summary=operation.get("summary"),
+                description=operation.get("description"),
+                parameters=[_openapi_param(p) for p in operation.get("parameters", [])],
+                request_body=_openapi_request_body(operation.get("requestBody")),
+                responses=_openapi_responses(operation.get("responses", {})),
+            )
+            results.append((endpoint, {path: {method_str: operation}}))
+    return results
+\end{lstlisting}
+
+A recursive helper, \texttt{\_openapi\_schema}, translates nested JSON
+Schema objects (\texttt{properties}, \texttt{items}, \texttt{required})
+into \texttt{SchemaSpec} instances, mirroring the recursive structure
+already defined in Phase 0. If a response is declared without a
+\texttt{content} block, such as a 204, it is correctly omitted from
+\texttt{responses} instead of being assigned an invented schema.
+
+\subsection{Postman collections}
+
+Postman collections nest requests inside folders arbitrarily deep, so
+traversal is recursive, as shown below:
+
+\begin{lstlisting}[language=Python, caption={Recursive traversal, with validation of malformed items}]
+def _walk_postman_items(items: list, results: list[tuple[EndpointSpec, dict]]) -> None:
+    for item in items:
+        if "item" in item:
+            _walk_postman_items(item["item"], results)
+            continue
+        if "request" not in item:
+            continue
+        request = item.get("request", {})
+        method_str = request.get("method", "GET").upper()
+        if method_str not in HTTPMethod.__members__:
+            continue
+
+        url = request.get("url", "")
+        endpoint = EndpointSpec(
+            method=HTTPMethod(method_str.lower()),
+            path=_postman_path(url),
+            summary=item.get("name"),
+            parameters=_postman_params(request, url),
+        )
+        results.append((endpoint, item))
+
+def _postman_path(url) -> str:
+    if isinstance(url, str):
+        path = urlparse(url).path
+    else:
+        path = "/" + "/".join(url.get("path", []))
+    segments = [f"{{{p[1:]}}}" if p.startswith(":") else p for p in path.split("/")]
+    return "/".join(segments) or "/"
+
+def _postman_params(request: dict, url) -> list[ParamSpec]:
+    params = [
+        ParamSpec(name=h["key"], location=ParamLocation.HEADER, required=not h.get("disabled", False), type="string")
+        for h in request.get("header", [])
+        if h.get("key") and not h.get("disabled", False)
+    ]
+    if isinstance(url, dict):
+        params += [
+            ParamSpec(name=q["key"], location=ParamLocation.QUERY, required=not q.get("disabled", False), type="string")
+            for q in url.get("query", [])
+            if q.get("key") and not q.get("disabled", False)
+        ]
+    return params
+\end{lstlisting}
+
+Postman's path-variable syntax is normalized to the OpenAPI style, so that
+\texttt{EndpointSpec.path} follows a single convention regardless of the
+originating format. Postman collections do not carry real response
+schemas, so that field is intentionally left empty for this format. Item
+traversal was validated against malformed items and against header/query
+parameters explicitly marked as disabled in the collection.
+
+\subsection{HAR archives}
+
+HAR is the only one of the three formats that carries a real, captured
+response body, which makes it the most reliable source for inferring
+response schemas from actual data rather than declared types:
+
+\begin{lstlisting}[language=Python, caption={Inferring a schema from a captured JSON value}]
+def _value_to_schema(value) -> SchemaSpec:
+    if isinstance(value, dict):
+        return SchemaSpec(
+            type="object",
+            properties={k: _value_to_schema(v) for k, v in value.items()},
+            required=list(value.keys()),
+        )
+    if isinstance(value, list):
+        return SchemaSpec(type="array", items=_value_to_schema(value[0]) if value else None)
+    if isinstance(value, bool):
+        return SchemaSpec(type="boolean")
+    if isinstance(value, int):
+        return SchemaSpec(type="integer")
+    if isinstance(value, float):
+        return SchemaSpec(type="number")
+    if value is None:
+        return SchemaSpec(type="null")
+    return SchemaSpec(type="string")
+\end{lstlisting}
+
+This function checks the type of the captured value in sequence, starting
+with \texttt{bool} before \texttt{int} so that a JSON boolean is not
+misclassified as an integer, and returns the corresponding
+\texttt{SchemaSpec}. It was also verified that an entry declaring an
+invalid HTTP method is skipped rather than processed.
+
+\section{Router}
+\begin{lstlisting}[language=Python, caption={\texttt{src/spekforge/ingest/router.py}}]
+from pathlib import Path
+from spekforge.ingest.base import Ingestor
+from spekforge.ingest.markitdown_ingestor import MarkitdownIngestor
+from spekforge.ingest.structured_ingestor import StructuredIngestor
+from spekforge.models.chunk import Chunk
+
+_INGESTORS: list[Ingestor] = [StructuredIngestor(), MarkitdownIngestor()]
+
+def route(source: Path) -> list[Chunk]:
+    for ingestor in _INGESTORS:
+        if ingestor.accepts(source):
+            return ingestor.to_intermediate(source)
+
+    raise ValueError(f"No ingestor accepts source: {source}")
+\end{lstlisting}
+
+\texttt{route()} is in charge of selecting the ingestor depending on the
+source. \texttt{StructuredIngestor} is tried first, since it is the more
+specific of the two, validating the actual JSON content shape rather than
+just the extension. If no registered ingestor accepts the source, the
+function raises a \texttt{ValueError} including the source path. This also
+covers a source path that does not exist on disk: \texttt{accepts()}
+catches the \texttt{OSError} raised while attempting to read it and simply
+returns \texttt{False}, so a missing file surfaces as the same explicit
+error as any other unrecognized source.
+
+\section{Validation against real documentation}
+
+To validate the pipeline against something more realistic than hand-written
+fixtures, the official OpenAPI 3.0 specification for Swagger Petstore was
+retrieved directly from its public instance
+(\texttt{petstore3.swagger.io}) and stored as the hidden ground truth for
+this project, in \texttt{tests/fixtures/petstore/ground\_truth/}.
+
+The Swagger UI documentation portal itself, however, could not be used
+directly as an ingestion source: it is a single-page application whose
+static HTML contains nothing but an empty \texttt{div} placeholder, with
+all real content rendered client-side by JavaScript. To still validate the
+pipeline against
+realistic narrative documentation, a Markdown document was generated
+directly from the official specification's 19 operations, following the
+same heading-per-endpoint convention real documentation generators
+produce, and stored separately in
+\texttt{tests/fixtures/petstore/input\_docs/}, apart from the hidden
+ground truth.
+
+Running the full pipeline (\texttt{router.route()} $\rightarrow$
+\texttt{MarkitdownIngestor} $\rightarrow$ \texttt{chunking.py}) against
+this generated Markdown fixture detected all 19 operations defined in the
+official specification, with zero missed and zero spurious endpoints. The
+next figure shows this ingestion run.
+
+\realcapture{0.85}{Phase1Router.png}{Full ingestion pipeline output against the real Petstore documentation fixture: 19 of 19 endpoints detected}
+
+\subsection{Edge cases review}
+
+Beyond the fixture above, every component of this phase was additionally
+exercised against edge cases designed to probe the phase further, such as
+empty input; boundary conditions in heading detection like consecutive
+headings, duplicate headings, and unusual whitespace; invalid methods;
+extension case sensitivity; malformed and non-existing source files;
+OpenAPI responses without a body; and invalid HTTP methods in Postman and
+HAR entries. This review is what led to the guard clauses already shown in
+this chapter's code, such as the malformed-item check in
+\texttt{\_walk\_postman\_items} and the \texttt{disabled} filter in
+\texttt{\_postman\_params}; with those in place, every case listed above
+is handled correctly.
+
+\section{Tests}
+\begin{lstlisting}[language=Python, caption={\texttt{tests/unit/test\_ingest.py}}]
+import json
+from pathlib import Path
+
+import pytest
+from spekforge.ingest.chunking import split_into_chunks
+from spekforge.ingest.markitdown_ingestor import MarkitdownIngestor
+from spekforge.ingest.router import route
+from spekforge.ingest.structured_ingestor import StructuredIngestor
+from spekforge.models.chunk import SourceType
+
+def test_split_into_chunks_detects_endpoints_by_heading():
+    markdown = """## GET /pets/{id}
+Retrieve a pet by id.
+
+## POST /pets
+Create a new pet.
+"""
+    chunks = split_into_chunks(markdown, "petstore.md")
+
+    assert len(chunks) == 2
+    assert chunks[0].candidate_method == "GET"
+    assert chunks[0].candidate_path == "/pets/{id}"
+    assert chunks[1].candidate_method == "POST"
+    assert chunks[1].candidate_path == "/pets"
+
+def test_split_into_chunks_ignores_inline_mentions():
+    markdown = "You can call GET /pets/{id} to retrieve a pet"
+    chunks = split_into_chunks(markdown, "petstore.md")
+
+    assert chunks == []
+
+def test_structured_ingestor_rejects_generic_json(tmp_path):
+    source = tmp_path / "not_structured.json"
+    source.write_text(json.dumps({"hello": "world"}))
+
+    assert StructuredIngestor().accepts(source) is False
+\end{lstlisting}
+
+In total, nine tests cover this phase's contract, including heading-boundary
+detection and its negative case, extension acceptance, all three
+\texttt{StructuredIngestor} formats including HAR type inference, generic
+JSON rejection, and the router's dispatch and error paths. Together with
+the edge-case review, this test suite is what gives confidence that the
+ingestion of real documentation behaves as intended.
